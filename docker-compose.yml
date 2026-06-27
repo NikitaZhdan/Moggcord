@@ -1,0 +1,101 @@
+services:
+  # --------------------------------------------------------------------
+  # БД для Java auth-сервиса (таблица users)
+  # --------------------------------------------------------------------
+  postgres-auth:
+    image: postgres:17
+    container_name: auth-db
+    environment:
+      POSTGRES_DB: auth-db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - auth-db_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  # --------------------------------------------------------------------
+  # БД для Python chat-сервиса (channels / channel_members / messages)
+  # --------------------------------------------------------------------
+  postgres-chat:
+    image: postgres:17
+    container_name: chat-db
+    environment:
+      POSTGRES_DB: chat-db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - chat-db_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  # --------------------------------------------------------------------
+  # Java: AuthorizationService — регистрация / логин / выдача JWT
+  # --------------------------------------------------------------------
+  auth-service:
+    build:
+      context: ./AuthorizationService-master
+      dockerfile: Dockerfile
+    container_name: auth-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-auth:5432/auth-db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SECRET_KEY: ${JWT_SECRET}
+    ports:
+      - "8080:8080"
+    networks:
+      - app-network
+
+  # --------------------------------------------------------------------
+  # Python: DSL — каналы, сообщения, WebSocket
+  # --------------------------------------------------------------------
+  chat-service:
+    build:
+      context: ./DSL
+      dockerfile: Dockerfile
+    container_name: chat-service
+    environment:
+      POSTGRES_URL: postgresql+asyncpg://postgres:postgres@postgres-chat:5432/chat-db
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: HS256
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+
+
+  # --------------------------------------------------------------------
+  # React UI
+  # --------------------------------------------------------------------
+  chat-ui:
+    build:
+      context: ./chat-ui
+      dockerfile: Dockerfile
+      args:
+        # Эти адреса "запекаются" в JS-бандл на этапе сборки и должны быть
+        # доступны из БРАУЗЕРА пользователя, а не из внутренней docker-сети.
+        # Для прод-деплоя замените localhost на реальный домен/IP.
+        VITE_AUTH_API_URL: ${PUBLIC_AUTH_URL:-http://localhost:8080}
+        VITE_CHAT_API_URL: ${PUBLIC_CHAT_URL:-http://localhost:8000}
+        VITE_CHAT_WS_URL: ${PUBLIC_CHAT_WS_URL:-ws://localhost:8000}
+    container_name: chat-ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - auth-service
+      - chat-service
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  auth-db_data:
+  chat-db_data:
