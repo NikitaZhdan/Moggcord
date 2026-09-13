@@ -19,12 +19,15 @@ class MessageRepository:
     async def get_channel_messages(
         self, channel_id: UUID, limit: int, before: datetime | None
     ) -> list[Message]:
-        query = select(Message).where(Message.channel_id == channel_id)
+        query = (
+            select(Message)
+            .where(Message.channel_id == channel_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
 
         if before:
             query = query.where(Message.created_at < before)
-
-        query = query.order_by(Message.created_at.desc()).limit(limit)
 
         result = await self.session.execute(query)
         messages = result.scalars().all()
@@ -35,7 +38,3 @@ class MessageRepository:
         await self.session.flush()
         await self.session.refresh(message)
         return message
-
-    async def delete(self, message: Message) -> None:
-        await self.session.delete(message)
-        await self.session.flush()

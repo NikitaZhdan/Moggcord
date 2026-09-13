@@ -3,7 +3,8 @@ package net.lvrbl.authorizationservice.entity;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
-import lombok.*;
+import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
@@ -42,4 +43,8 @@ public class Users {
     @NotNull
     @Column(name = "updated_at")
     private Instant updatedAt;
+
+    public String toString() {
+        return "Username: " + this.username +  ", Email: " + this.email + "Password: " + this.password;
+    }
 }

@@ -36,6 +36,12 @@ class ChannelRepository:
         await self.session.refresh(channel)
         return channel
 
+    async def get_channel_member_ids(self, channel_id: UUID) -> list[UUID]:
+        result = await self.session.execute(
+            select(ChannelMember.user_id).where(ChannelMember.channel_id == channel_id)
+        )
+        return list(result.scalars().all())
+
     async def get_member(self, channel_id: UUID, user_id: UUID) -> ChannelMember | None:
         result = await self.session.execute(
             select(ChannelMember).where(

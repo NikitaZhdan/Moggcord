@@ -18,3 +18,4 @@ class Channel(Base):
 
     messages: Mapped[List["Message"]] = relationship(back_populates="channel")
     channel_members: Mapped[List["ChannelMember"]] = relationship(back_populates="channel")
+    calls: Mapped[List["Call"]] = relationship(back_populates="channel")

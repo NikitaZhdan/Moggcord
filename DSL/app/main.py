@@ -14,5 +14,6 @@ app.add_middleware(
     allow_headers=["*"],             # Разрешить все заголовки
 )
 
+
 app.include_router(api_router)
 app.add_api_websocket_route("/ws/channels/{channel_id}", websocket_endpoint)

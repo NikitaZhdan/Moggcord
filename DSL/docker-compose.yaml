@@ -1,7 +1,7 @@
 services:
-  chat-db:
+  postgres:
     image: postgres:17
-    container_name: postgres
+    container_name: postgres1
     ports:
       - "5432:5432"
     environment:
@@ -10,16 +10,6 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  chat-service1:
-    build: .
-    container_name: chat-service
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres  # или своя БД
-    ports:
-      - "8000:8000"
 
 volumes:
   postgres_data:

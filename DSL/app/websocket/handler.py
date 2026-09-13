@@ -5,9 +5,11 @@ from jose import jwt, JWTError
 import base64
 from app.core.config import settings
 from app.database.database import new_session
+from app.database.models import Call, CallType
 from app.websocket.manager import manager
-from app.repositories import ChannelRepository, MessageRepository
-from app.services import ChannelService, MessageService
+from app.repositories import ChannelRepository, MessageRepository, CallRepository
+from app.services import ChannelService, MessageService, CallService
+from app.schemas.call import CallResponse
 from app.dependencies import get_current_user
 
 def _signing_key() -> bytes:
@@ -29,6 +31,10 @@ def _get_user_id_from_token(token: str) -> UUID:
         raise ValueError(f"Invalid token: {e}")
 
 
+def _call_payload(event_type: str, call: Call) -> dict:
+    return {"type": event_type, "call": CallResponse.model_validate(call).model_dump(mode="json")}
+
+
 async def websocket_endpoint(
     websocket: WebSocket,
     channel_id: UUID,
@@ -46,15 +52,17 @@ async def websocket_endpoint(
     async with new_session() as session:
         channel_repo = ChannelRepository(session)
         message_repo = MessageRepository(session)
+        call_repo = CallRepository(session)
         channel_service = ChannelService(channel_repo)
         message_service = MessageService(message_repo, channel_service)
+        call_service = CallService(call_repo, channel_service)
         try:
             await channel_service.assert_member(channel_id, user_id)
         except Exception:
             await websocket.close(code=4003)
             return
 
-        await manager.connect(websocket, channel_id)
+        await manager.connect(websocket, channel_id, user_id)
 
         await manager.broadcast(
             channel_id,
@@ -72,15 +80,35 @@ async def websocket_endpoint(
                     username=username,
                     user_id=user_id,
                     message_service=message_service,
+                    call_service=call_service,
                     session=session,
                 )
 
         except WebSocketDisconnect:
-            manager.disconnect(websocket, channel_id)
+            manager.disconnect(websocket, channel_id, user_id)
 
             await manager.broadcast(
                 channel_id, {"type": "user_left", "user_id": str(user_id)}
             )
+            await _leave_any_active_call(channel_id, user_id, call_service, session)
+
+
+async def _leave_any_active_call(
+    channel_id: UUID, user_id: UUID, call_service: CallService, session: AsyncSession
+) -> None:
+    try:
+        active_call = await call_service.repo.get_active_call_for_channel(channel_id)
+        if not active_call:
+            return
+        participant = call_service.repo.get_participant(active_call, user_id)
+        if not participant or participant.left_at:
+            return
+
+        call = await call_service.leave(active_call.id, user_id)
+        await session.commit()
+        await manager.broadcast(channel_id, _call_payload("call.left", call))
+    except Exception:
+        await session.rollback()
 
 
 async def _handle_message(
@@ -90,6 +118,7 @@ async def _handle_message(
     username: str,
     user_id: UUID,
     message_service: MessageService,
+    call_service: CallService,
     session: AsyncSession,
 ) -> None:
 
@@ -125,9 +154,117 @@ async def _handle_message(
             "is_typing": False
         }, exclude=websocket)
 
+    elif event_type == "call.invite":
+        await _handle_call_invite(data, websocket, channel_id, user_id, call_service, session)
+
+    elif event_type == "call.accept":
+        await _handle_call_accept(data, websocket, channel_id, user_id, call_service, session)
+
+    elif event_type in ("call.decline", "call.leave", "call.cancel"):
+        await _handle_call_leave(data, websocket, channel_id, user_id, call_service, session)
+
+    elif event_type in ("webrtc.offer", "webrtc.answer", "webrtc.ice-candidate"):
+        await _handle_webrtc_relay(event_type, data, websocket, channel_id, user_id)
+
     else:
         await websocket.send_json(
             {"type": "error", "detail": f"Unknown event type: {event_type}"}
+        )
+
+
+async def _handle_call_invite(
+    data: dict,
+    websocket: WebSocket,
+    channel_id: UUID,
+    user_id: UUID,
+    call_service: CallService,
+    session: AsyncSession,
+) -> None:
+    raw_type = data.get("call_type", "audio")
+    try:
+        call_type = CallType(raw_type)
+    except ValueError:
+        await websocket.send_json({"type": "error", "detail": f"Invalid call_type: {raw_type}"})
+        return
+
+    try:
+        call = await call_service.invite(channel_id=channel_id, initiator_id=user_id, call_type=call_type)
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        await websocket.send_json({"type": "error", "detail": str(e)})
+        return
+    await websocket.send_json(_call_payload("call.created", call))
+    await manager.broadcast(channel_id, _call_payload("call.incoming", call), exclude=websocket)
+
+
+async def _handle_call_accept(
+    data: dict,
+    websocket: WebSocket,
+    channel_id: UUID,
+    user_id: UUID,
+    call_service: CallService,
+    session: AsyncSession,
+) -> None:
+    call_id = data.get("call_id")
+    if not call_id:
+        await websocket.send_json({"type": "error", "detail": "call_id required"})
+        return
+
+    try:
+        call = await call_service.accept(call_id=UUID(call_id), user_id=user_id)
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        await websocket.send_json({"type": "error", "detail": str(e)})
+        return
+
+    await manager.broadcast(channel_id, _call_payload("call.accepted", call))
+
+
+async def _handle_call_leave(
+    data: dict,
+    websocket: WebSocket,
+    channel_id: UUID,
+    user_id: UUID,
+    call_service: CallService,
+    session: AsyncSession,
+) -> None:
+    call_id = data.get("call_id")
+    if not call_id:
+        await websocket.send_json({"type": "error", "detail": "call_id required"})
+        return
+
+    try:
+        call = await call_service.leave(call_id=UUID(call_id), user_id=user_id)
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        await websocket.send_json({"type": "error", "detail": str(e)})
+        return
+
+    event = "call.ended" if call.ended_at else "call.left"
+    await manager.broadcast(channel_id, _call_payload(event, call))
+
+
+async def _handle_webrtc_relay(
+    event_type: str,
+    data: dict,
+    websocket: WebSocket,
+    channel_id: UUID,
+    user_id: UUID,
+) -> None:
+    target_user_id = data.get("target_user_id")
+    if not target_user_id:
+        await websocket.send_json({"type": "error", "detail": "target_user_id required"})
+        return
+
+    payload = {**data, "type": event_type, "from_user_id": str(user_id)}
+    delivered = await manager.send_to_user(channel_id, UUID(target_user_id), payload)
+
+    if not delivered:
+        await websocket.send_json(
+            {"type": "error", "detail": f"User {target_user_id} is not connected"}
         )
 
 

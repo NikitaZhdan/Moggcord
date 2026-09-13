@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.database.session import get_session
-from app.repositories import ChannelRepository, MessageRepository
-from app.services import ChannelService, MessageService
+from app.repositories import ChannelRepository, MessageRepository, CallRepository
+from app.services import ChannelService, MessageService, CallService
 
 bearer_scheme = HTTPBearer()
 
@@ -55,3 +55,14 @@ def get_message_service(
     channel_service: ChannelService = Depends(get_channel_service),
 ) -> MessageService:
     return MessageService(message_repo, channel_service)
+
+
+def get_call_repo(session: AsyncSession = Depends(get_session)) -> CallRepository:
+    return CallRepository(session)
+
+
+def get_call_service(
+    call_repo: CallRepository = Depends(get_call_repo),
+    channel_service: ChannelService = Depends(get_channel_service),
+) -> CallService:
+    return CallService(call_repo, channel_service)

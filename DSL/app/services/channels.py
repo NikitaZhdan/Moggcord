@@ -40,6 +40,9 @@ class ChannelService:
         if member:
             await self.repo.delete_member(member)
 
+    async def get_member_ids(self, channel_id: UUID) -> list[UUID]:
+        return await self.repo.get_channel_member_ids(channel_id)
+
     async def assert_member(self, channel_id: UUID, user_id: UUID) -> None:
         member = await self.repo.get_member(channel_id, user_id)
         if not member:

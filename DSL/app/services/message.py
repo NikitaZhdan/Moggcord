@@ -51,16 +51,11 @@ class MessageService:
         message.edited_at = datetime.now(timezone.utc)
         return await self.repo.save(message)
 
+    async def delete(self, message_id: UUID, user_id: UUID) -> None:
+        pass
+
     async def _get_or_404(self, message_id: UUID) -> Message:
         message = await self.repo.get_by_id(message_id)
         if not message:
             raise HTTPException(404, "Message not found")
         return message
-
-    async def delete(self, message_id: UUID, user_id: UUID) -> None:
-        message = await self._get_or_404(message_id)
-
-        if message.author_id != user_id:
-            raise HTTPException(404,"You can only delete your own messages")
-
-        await self.repo.delete(message)

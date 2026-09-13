@@ -4,9 +4,15 @@ from datetime import datetime
 
 from app.schemas.channel import ChannelCreate, ChannelResponse
 from app.schemas.message import MessageResponse
-from app.services import ChannelService, MessageService
+from app.schemas.call import CallResponse
+from app.services import ChannelService, MessageService, CallService
 
-from app.dependencies import get_channel_service, get_message_service, get_current_user
+from app.dependencies import (
+    get_channel_service,
+    get_message_service,
+    get_call_service,
+    get_current_user,
+)
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
@@ -57,3 +63,13 @@ async def get_messages(
     return await service.get_history(
         channel_id=channel_id, user_id=user_id, limit=limit, before=before
     )
+
+
+@router.get("/{channel_id}/calls", response_model=list[CallResponse])
+async def get_call_history(
+    channel_id: UUID,
+    limit: int = 50,
+    service: CallService = Depends(get_call_service),
+    user_id: UUID = Depends(get_current_user),
+):
+    return await service.get_history(channel_id=channel_id, user_id=user_id, limit=limit)

@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ email: '', username: '', password: '' })
+  const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -39,10 +39,6 @@ export default function LoginPage() {
           <label>
             Email
             <input type="email" required value={form.email} onChange={update('email')} />
-          </label>
-          <label>
-            Имя пользователя
-            <input required value={form.username} onChange={update('username')} />
           </label>
           <label>
             Пароль
